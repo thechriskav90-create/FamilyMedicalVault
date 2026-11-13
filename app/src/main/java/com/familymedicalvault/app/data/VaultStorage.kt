@@ -35,6 +35,16 @@ class VaultStorage(private val context: Context) {
         return person.findFile(category.folderName)?.takeIf { it.isDirectory }
     }
 
+    fun existingRelativeDirectory(rootUri: Uri, relativePath: String): DocumentFile? {
+        var current = root(rootUri) ?: return null
+        val parts = relativePath.replace('\\', '/').split('/').filter { it.isNotBlank() }
+        for (part in parts) {
+            val next = current.findFile(part)?.takeIf { it.isDirectory } ?: return null
+            current = next
+        }
+        return current
+    }
+
     fun importDocument(
         rootUri: Uri,
         personFolder: String,
@@ -100,6 +110,29 @@ class VaultStorage(private val context: Context) {
     ): Result<String> = runCatching {
         val targetDir = existingCategoryDirectory(rootUri, personFolder, category)
             ?: error("Δεν βρέθηκε ο υπάρχων φάκελος: " + personFolder + " / " + category.folderName)
+        val safeName = uniqueName(targetDir, sanitizeFileName(preferredName))
+        val target = targetDir.createFile(mimeType, safeName) ?: error("Αποτυχία δημιουργίας αρχείου")
+        try {
+            context.contentResolver.openOutputStream(target.uri, "w").use { output ->
+                requireNotNull(output) { "Αδυναμία εγγραφής αρχείου" }
+                writer(output)
+            }
+            target.uri.toString()
+        } catch (t: Throwable) {
+            runCatching { target.delete() }
+            throw t
+        }
+    }
+
+    fun importWithWriterAtExistingPath(
+        rootUri: Uri,
+        relativePath: String,
+        preferredName: String,
+        mimeType: String,
+        writer: (OutputStream) -> Unit
+    ): Result<String> = runCatching {
+        val targetDir = existingRelativeDirectory(rootUri, relativePath)
+            ?: error("Δεν βρέθηκε ο υπάρχων φάκελος: " + relativePath)
         val safeName = uniqueName(targetDir, sanitizeFileName(preferredName))
         val target = targetDir.createFile(mimeType, safeName) ?: error("Αποτυχία δημιουργίας αρχείου")
         try {
