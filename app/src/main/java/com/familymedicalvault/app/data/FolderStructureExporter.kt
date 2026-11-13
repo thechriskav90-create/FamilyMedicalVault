@@ -53,12 +53,15 @@ class FolderStructureExporter(private val context: Context) {
 
         walk(examsRoot, "", 0)
 
+        val selectedRootName = grantedRoot.name ?: "root"
         val rootName = examsRoot.name ?: "Ιατρικός_φάκελος"
         val json = JSONObject()
             .put("format", "familymedicalvault-structure")
             .put("version", 1)
             .put("scope", "exams")
+            .put("selectedRootName", selectedRootName)
             .put("rootName", rootName)
+            .put("fullRootPath", selectedRootName + "/" + rootName)
             .put("generatedAtEpochMs", System.currentTimeMillis())
             .put("containsFileContents", false)
             .put("entries", entries)
