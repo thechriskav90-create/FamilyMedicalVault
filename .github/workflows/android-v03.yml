@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: familymedicalvault-v03
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,6 +25,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Restore persistent signing key
+        uses: actions/cache@v4
+        with:
+          path: .signing/fmv-debug.keystore
+          key: familymedicalvault-stable-debug-signing-v1
+
+      - name: Create signing key if missing
+        shell: bash
+        run: |
+          mkdir -p .signing
+          if [ ! -f .signing/fmv-debug.keystore ]; then
+            keytool -genkeypair               -keystore .signing/fmv-debug.keystore               -storepass android               -alias androiddebugkey               -keypass android               -dname "CN=FamilyMedicalVault Debug,O=FamilyMedicalVault,C=GR"               -keyalg RSA               -keysize 2048               -validity 10000
+          fi
 
       - name: Install Android SDK 36
         shell: bash
@@ -58,9 +76,14 @@ jobs:
             exit 1
           fi
 
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FamilyMedicalVault-v0.3-debug
+          name: FamilyMedicalVault-v0.3.3-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
