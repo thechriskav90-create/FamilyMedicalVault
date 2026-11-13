@@ -15,7 +15,7 @@ class FolderStructureExporter(private val context: Context) {
 
         val examsRoots = locateAllExamsRoots(grantedRoot)
         require(examsRoots.isNotEmpty()) {
-            "Δεν βρέθηκε κανένας φάκελος εξετάσεων με όνομα Ιατρικός_φάκελος_* σε κανένα υποφάκελο."
+            "Δεν βρέθηκε κανένας φάκελος εξετάσεων με όνομα Εξετάσεις σε κανένα υποφάκελο."
         }
 
         var totalEntries = 0
@@ -64,7 +64,7 @@ class FolderStructureExporter(private val context: Context) {
             rootsJson.put(
                 JSONObject()
                     .put("relativePath", rootPath)
-                    .put("rootName", examsRoot.name ?: "Ιατρικός_φάκελος")
+                    .put("rootName", examsRoot.name ?: "Εξετάσεις")
                     .put("entries", walk(examsRoot, "", 0))
             )
         }
@@ -119,11 +119,17 @@ class FolderStructureExporter(private val context: Context) {
     }
 
     private fun isExamsFolderName(name: String): Boolean {
-        val normalized = name.lowercase()
-        return normalized.startsWith("ιατρικός_φάκελος_") ||
-            normalized.startsWith("ιατρικος_φακελος_") ||
-            normalized == "ιατρικός_φάκελος" ||
-            normalized == "ιατρικος_φακελος"
+        val normalized = name
+            .trim()
+            .lowercase()
+            .replace('ά', 'α')
+            .replace('έ', 'ε')
+            .replace('ή', 'η')
+            .replace('ί', 'ι')
+            .replace('ό', 'ο')
+            .replace('ύ', 'υ')
+            .replace('ώ', 'ω')
+        return normalized == "εξετασεις"
     }
 
     companion object {
