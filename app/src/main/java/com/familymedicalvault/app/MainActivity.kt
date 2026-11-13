@@ -47,11 +47,8 @@ import com.familymedicalvault.app.data.FolderStructureExporter
 import com.familymedicalvault.app.data.VaultPreferences
 import com.familymedicalvault.app.data.VaultStorage
 import com.familymedicalvault.app.model.MedicalCategory
-import com.familymedicalvault.app.export.FolderTreeExporter
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -122,13 +119,73 @@ fun MedicalVaultApp(initialPerson: String? = null, initialCategory: MedicalCateg
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (rootUri == null) {
-                    Text("Διάλεξε έναν φάκελο που θα χρησιμοποιείται αποκλειστικά ως οικογενειακό ιατρικό αρχείο.")
+                    Text("Διάλεξε τον κεντρικό φάκελο που περιέχει το ιατρικό αρχείο.")
                     Button(onClick = { treePicker.launch(null) }) { Text("Σύνδεση φακέλου") }
                     Text("Η εφαρμογή δεν ζητά γενική πρόσβαση στα αρχεία και δεν χρησιμοποιεί Internet.")
                     return@Column
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            message = "Ετοιμασία δομής εξετάσεων…"
+                            val result = withContext(Dispatchers.IO) {
+                                FolderStructureExporter(context).exportExamsTree(rootUri)
+                            }
+                            result.onSuccess { file ->
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    context.packageName + ".fileprovider",
+                                    file
+                                )
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/json"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    putExtra(
+                                        Intent.EXTRA_TEXT,
+                                        "Δομή του φακέλου εξετάσεων από FamilyMedicalVault. Περιέχει μόνο ονόματα φακέλων/αρχείων και μεταδεδομένα, όχι το περιεχόμενο των εξετάσεων."
+                                    )
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    clipData = ClipData.newUri(
+                                        context.contentResolver,
+                                        "Δομή φακέλου εξετάσεων",
+                                        uri
+                                    )
+                                }
+                                message = null
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        shareIntent,
+                                        "Κοινή χρήση δομής εξετάσεων"
+                                    )
+                                )
+                            }.onFailure { error ->
+                                message = "Αποτυχία εξαγωγής δομής: " +
+                                    (error.message ?: "άγνωστο σφάλμα")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Κοινή χρήση δομής εξετάσεων με ChatGPT")
+                }
+
+                Text(
+                    "Στέλνει όλο το δέντρο του Ιατρικός_φάκελος_*: φακέλους, ονόματα αρχείων, τύπο, μέγεθος και ημερομηνία. Δεν στέλνει το περιεχόμενο των εξετάσεων.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Button(
+                    onClick = { fmvPicker.launch(arrayOf("*/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Εισαγωγή .fmv από ChatGPT")
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     OutlinedTextField(
                         value = newPersonName,
                         onValueChange = { newPersonName = it },
@@ -144,109 +201,12 @@ fun MedicalVaultApp(initialPerson: String? = null, initialCategory: MedicalCateg
                     }) { Text("Προσθήκη") }
                 }
 
-                Button(
-                    onClick = {
-                        scope.launch {
-                            message = "Ετοιμασία δομής φακέλου εξετάσεων…"
-                            val result = withContext(Dispatchers.IO) {
-                                FolderStructureExporter(context).exportExamsTree(rootUri)
-                            }
-
-                            result.onSuccess { file ->
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    context.packageName + ".fileprovider",
-                                    file
-                                )
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/json"
-                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    clipData = ClipData.newUri(
-                                        context.contentResolver,
-                                        "Δομή φακέλου εξετάσεων",
-                                        uri
-                                    )
-                                }
-                                message = null
-                                context.startActivity(
-                                    Intent.createChooser(
-                                        shareIntent,
-                                        "Κοινή χρήση δομής εξετάσεων με ChatGPT"
-                                    )
-                                )
-                            }.onFailure { error ->
-                                message = "Αποτυχία εξαγωγής δομής: " +
-                                    (error.message ?: "άγνωστο σφάλμα")
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Κοινή χρήση δομής εξετάσεων με ChatGPT")
-                }
-                Text(
-                    "Στέλνει μόνο ονόματα φακέλων/αρχείων και βασικά μεταδεδομένα — όχι το περιεχόμενο των εξετάσεων.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-
-                Button(
-                    onClick = { fmvPicker.launch(arrayOf("*/*")) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Εισαγωγή .fmv από ChatGPT")
-                }
-
-                Button(
-                    onClick = {
-                        scope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                FolderTreeExporter.exportMedicalFolderStructure(context, rootUri)
-                            }
-                            result.onSuccess { export ->
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/json"
-                                    putExtra(Intent.EXTRA_STREAM, export.shareUri)
-                                    putExtra(
-                                        Intent.EXTRA_TEXT,
-                                        "Δομή ιατρικού φακέλου: " + export.rootName +
-                                            " (" + export.itemCount + " αντικείμενα). " +
-                                            "Περιέχει μόνο ονόματα/μεταδεδομένα, όχι ιατρικό περιεχόμενο."
-                                    )
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    clipData = ClipData.newUri(
-                                        context.contentResolver,
-                                        "FamilyMedicalVault exams structure",
-                                        export.shareUri
-                                    )
-                                }
-                                context.startActivity(
-                                    Intent.createChooser(
-                                        shareIntent,
-                                        "Κοινή χρήση δομής με ChatGPT"
-                                    )
-                                )
-                                message = "Η δομή του φακέλου εξετάσεων είναι έτοιμη για κοινή χρήση."
-                            }.onFailure {
-                                message = "Αποτυχία εξαγωγής δομής: " + (it.message ?: "άγνωστο σφάλμα")
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Κοινή χρήση δομής εξετάσεων")
-                }
-                Text(
-                    "Στέλνει μόνο ονόματα φακέλων/αρχείων και βασικά μεταδεδομένα. Δεν στέλνει το περιεχόμενο των εξετάσεων.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-
                 message?.let { Text(it) }
 
                 val people = remember(rootUriString, refreshTick) { storage.listPeople(rootUri) }
                 if (selectedPerson == null || people.none { it.name == selectedPerson }) {
                     if (selectedPerson != null) selectedPerson = null
-                    Text("Πρόσωπα", style = MaterialTheme.typography.titleMedium)
+                    Text("Φάκελοι", style = MaterialTheme.typography.titleMedium)
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(people, key = { it.uri.toString() }) { person ->
                             ElevatedCard(
@@ -254,14 +214,14 @@ fun MedicalVaultApp(initialPerson: String? = null, initialCategory: MedicalCateg
                             ) {
                                 Column(Modifier.padding(16.dp)) {
                                     Text(person.name ?: "Χωρίς όνομα", style = MaterialTheme.typography.titleMedium)
-                                    Text("Άνοιγμα ιατρικού φακέλου")
+                                    Text("Άνοιγμα φακέλου")
                                 }
                             }
                         }
                     }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { selectedPerson = null }) { Text("← Πρόσωπα") }
+                        TextButton(onClick = { selectedPerson = null }) { Text("← Φάκελοι") }
                         Spacer(Modifier.width(8.dp))
                         Text(selectedPerson!!, style = MaterialTheme.typography.titleLarge)
                     }
