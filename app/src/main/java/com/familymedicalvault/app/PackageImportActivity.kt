@@ -144,6 +144,7 @@ private fun PackageImportScreen(
                 InfoRow("Όνομα αρχείου", item.displayName)
                 InfoRow("Τύπος αρχείου", item.mimeType)
                 InfoRow("Προέλευση", item.source)
+                item.relativePath?.let { InfoRow("Ακριβής φάκελος", it) }
 
                 if (!imported) {
                     Button(
@@ -152,13 +153,7 @@ private fun PackageImportScreen(
                             importing = true
                             scope.launch {
                                 val result = withContext(Dispatchers.IO) {
-                                    storage.importWithWriter(
-                                        rootUri = rootUri,
-                                        personFolder = item.person,
-                                        category = category,
-                                        preferredName = item.displayName,
-                                        mimeType = item.mimeType
-                                    ) { output ->
+                                    val writer: (java.io.OutputStream) -> Unit = { output ->
                                         FmvPackage.copyPayload(
                                             openStream = {
                                                 context.contentResolver.openInputStream(uri)
@@ -167,6 +162,24 @@ private fun PackageImportScreen(
                                             manifest = item,
                                             output = output
                                         ).getOrThrow()
+                                    }
+                                    if (item.relativePath != null) {
+                                        storage.importWithWriterAtExistingPath(
+                                            rootUri = rootUri,
+                                            relativePath = item.relativePath,
+                                            preferredName = item.displayName,
+                                            mimeType = item.mimeType,
+                                            writer = writer
+                                        )
+                                    } else {
+                                        storage.importWithWriterExistingOnly(
+                                            rootUri = rootUri,
+                                            personFolder = item.person,
+                                            category = category,
+                                            preferredName = item.displayName,
+                                            mimeType = item.mimeType,
+                                            writer = writer
+                                        )
                                     }
                                 }
 
