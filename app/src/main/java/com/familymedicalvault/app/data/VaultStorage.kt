@@ -30,6 +30,11 @@ class VaultStorage(private val context: Context) {
         return person.findFile(category.folderName) ?: person.createDirectory(category.folderName)
     }
 
+    fun existingCategoryDirectory(rootUri: Uri, personFolder: String, category: MedicalCategory): DocumentFile? {
+        val person = root(rootUri)?.findFile(sanitize(personFolder))?.takeIf { it.isDirectory } ?: return null
+        return person.findFile(category.folderName)?.takeIf { it.isDirectory }
+    }
+
     fun importDocument(
         rootUri: Uri,
         personFolder: String,
@@ -85,8 +90,32 @@ class VaultStorage(private val context: Context) {
         }
     }
 
+    fun importWithWriterExistingOnly(
+        rootUri: Uri,
+        personFolder: String,
+        category: MedicalCategory,
+        preferredName: String,
+        mimeType: String,
+        writer: (OutputStream) -> Unit
+    ): Result<String> = runCatching {
+        val targetDir = existingCategoryDirectory(rootUri, personFolder, category)
+            ?: error("Δεν βρέθηκε ο υπάρχων φάκελος: " + personFolder + " / " + category.folderName)
+        val safeName = uniqueName(targetDir, sanitizeFileName(preferredName))
+        val target = targetDir.createFile(mimeType, safeName) ?: error("Αποτυχία δημιουργίας αρχείου")
+        try {
+            context.contentResolver.openOutputStream(target.uri, "w").use { output ->
+                requireNotNull(output) { "Αδυναμία εγγραφής αρχείου" }
+                writer(output)
+            }
+            target.uri.toString()
+        } catch (t: Throwable) {
+            runCatching { target.delete() }
+            throw t
+        }
+    }
+
     fun listDocuments(rootUri: Uri, personFolder: String, category: MedicalCategory): List<DocumentFile> =
-        categoryDirectory(rootUri, personFolder, category)?.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
+        existingCategoryDirectory(rootUri, personFolder, category)?.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
 
     private fun uniqueName(dir: DocumentFile, name: String): String {
         if (dir.findFile(name) == null) return name
