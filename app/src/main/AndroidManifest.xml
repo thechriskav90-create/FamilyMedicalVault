@@ -37,6 +37,10 @@
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="image/*" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="application/vnd.familymedicalvault.package+zip" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
 
