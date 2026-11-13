@@ -17,7 +17,8 @@ data class FmvManifest(
     val mimeType: String,
     val payload: String,
     val sha256: String,
-    val source: String
+    val source: String,
+    val relativePath: String? = null
 )
 
 object FmvPackage {
@@ -38,7 +39,8 @@ object FmvPackage {
             mimeType = json.optString("mimeType"),
             payload = json.optString("payload"),
             sha256 = json.optString("sha256").lowercase(),
-            source = json.optString("source", "Άγνωστη")
+            source = json.optString("source", "Άγνωστη"),
+            relativePath = json.optString("relativePath").takeIf { it.isNotBlank() }
         )
         validateManifest(manifest)
         verifyPayload(openStream, manifest)
@@ -122,6 +124,7 @@ object FmvPackage {
         require(m.version == VERSION) { "Μη υποστηριζόμενη έκδοση πακέτου." }
         require(m.person.isNotBlank() && m.person.length <= 100 && !m.person.contains('\u0000')) { "Μη έγκυρο πρόσωπο." }
         require(MedicalCategory.fromFolderName(m.category) != null) { "Άγνωστη κατηγορία." }
+        m.relativePath?.let { validateRelativePath(it) }
         require(isSafeFileName(m.displayName)) { "Μη ασφαλές όνομα αρχείου." }
         require(m.mimeType.isNotBlank() && m.mimeType.length <= 150) { "Μη έγκυρος MIME τύπος." }
         validateZipPath(m.payload)
@@ -133,6 +136,19 @@ object FmvPackage {
         if (name.isBlank() || name.length > 240 || name == "." || name == "..") return false
         if (name.any { it == '/' || it == '\\' || it == '\u0000' || it.code < 32 }) return false
         return true
+    }
+
+    private fun validateRelativePath(path: String) {
+        require(path.length <= 500) { "Η διαδρομή προορισμού είναι υπερβολικά μεγάλη." }
+        require(!path.startsWith("/") && !path.startsWith("\\")) { "Μη ασφαλής διαδρομή προορισμού." }
+        require(!path.contains('\u0000')) { "Μη ασφαλής διαδρομή προορισμού." }
+        val normalized = path.replace('\\', '/')
+        val parts = normalized.split('/').filter { it.isNotBlank() }
+        require(parts.isNotEmpty()) { "Κενή διαδρομή προορισμού." }
+        require(parts.none { it == "." || it == ".." }) { "Μη ασφαλής διαδρομή προορισμού." }
+        require(parts.all { part -> part.none { ch -> ch.code < 32 || ch in setOf(':', '*', '?', '"', '<', '>', '|') } }) {
+            "Μη ασφαλής διαδρομή προορισμού."
+        }
     }
 
     private fun validateZipPath(name: String) {
