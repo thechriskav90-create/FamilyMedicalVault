@@ -12,8 +12,23 @@ android {
         applicationId = "com.familymedicalvault.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.3.2"
+        versionCode = 6
+        versionName = "0.3.3"
+    }
+
+    signingConfigs {
+        create("stableDebug") {
+            storeFile = rootProject.file(".signing/fmv-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("stableDebug")
+        }
     }
 
     buildFeatures { compose = true }
