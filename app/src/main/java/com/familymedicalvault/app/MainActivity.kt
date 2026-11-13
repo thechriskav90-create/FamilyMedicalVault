@@ -85,6 +85,15 @@ fun MedicalVaultApp(initialPerson: String? = null, initialCategory: MedicalCateg
         }
     }
 
+    val fmvPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            context.startActivity(Intent(context, PackageImportActivity::class.java).apply {
+                data = uri
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        }
+    }
+
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val person = selectedPerson
         val root = rootUri
@@ -127,6 +136,17 @@ fun MedicalVaultApp(initialPerson: String? = null, initialCategory: MedicalCateg
                         }
                     }) { Text("Προσθήκη") }
                 }
+
+                Button(
+                    onClick = { fmvPicker.launch(arrayOf("*/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Εισαγωγή .fmv από ChatGPT")
+                }
+                Text(
+                    "Διάλεξε το αρχείο .fmv από τις Λήψεις. Η εφαρμογή θα το ελέγξει πριν σου δείξει την επιβεβαίωση.",
+                    style = MaterialTheme.typography.bodySmall
+                )
 
                 message?.let { Text(it) }
 
