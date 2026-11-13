@@ -40,14 +40,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.familymedicalvault.app.data.FolderStructureExporter
 import com.familymedicalvault.app.data.VaultPreferences
 import com.familymedicalvault.app.data.VaultStorage
 import com.familymedicalvault.app.model.MedicalCategory
 import com.familymedicalvault.app.export.FolderTreeExporter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -141,15 +145,57 @@ fun MedicalVaultApp(initialPerson: String? = null, initialCategory: MedicalCateg
                 }
 
                 Button(
+                    onClick = {
+                        scope.launch {
+                            message = "Ετοιμασία δομής φακέλου εξετάσεων…"
+                            val result = withContext(Dispatchers.IO) {
+                                FolderStructureExporter(context).exportExamsTree(rootUri)
+                            }
+
+                            result.onSuccess { file ->
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    context.packageName + ".fileprovider",
+                                    file
+                                )
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/json"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    clipData = ClipData.newUri(
+                                        context.contentResolver,
+                                        "Δομή φακέλου εξετάσεων",
+                                        uri
+                                    )
+                                }
+                                message = null
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        shareIntent,
+                                        "Κοινή χρήση δομής εξετάσεων με ChatGPT"
+                                    )
+                                )
+                            }.onFailure { error ->
+                                message = "Αποτυχία εξαγωγής δομής: " +
+                                    (error.message ?: "άγνωστο σφάλμα")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Κοινή χρήση δομής εξετάσεων με ChatGPT")
+                }
+                Text(
+                    "Στέλνει μόνο ονόματα φακέλων/αρχείων και βασικά μεταδεδομένα — όχι το περιεχόμενο των εξετάσεων.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Button(
                     onClick = { fmvPicker.launch(arrayOf("*/*")) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Εισαγωγή .fmv από ChatGPT")
                 }
-                Text(
-                    "Διάλεξε το αρχείο .fmv από τις Λήψεις. Η εφαρμογή θα το ελέγξει πριν σου δείξει την επιβεβαίωση.",
-                    style = MaterialTheme.typography.bodySmall
-                )
 
                 Button(
                     onClick = {
