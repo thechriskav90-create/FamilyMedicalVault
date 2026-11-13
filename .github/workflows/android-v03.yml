@@ -1,0 +1,64 @@
+name: FamilyMedicalVault v0.3 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fmv-v0.3
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Lint
+        run: gradle :app:lintDebug --stacktrace
+
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify restricted permissions are absent
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$APK" | tee /tmp/permissions.txt
+          if grep -q "android.permission.INTERNET" /tmp/permissions.txt; then
+            echo "INTERNET permission unexpectedly present"
+            exit 1
+          fi
+          if grep -q "android.permission.MANAGE_EXTERNAL_STORAGE" /tmp/permissions.txt; then
+            echo "MANAGE_EXTERNAL_STORAGE unexpectedly present"
+            exit 1
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FamilyMedicalVault-v0.3-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
