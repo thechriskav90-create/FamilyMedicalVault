@@ -1,9 +1,11 @@
 package com.familymedicalvault.app
 
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +37,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.familymedicalvault.app.data.VaultPreferences
 import com.familymedicalvault.app.data.VaultStorage
 import com.familymedicalvault.app.model.MedicalCategory
+import com.familymedicalvault.app.packageio.FmvPackage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,18 +52,44 @@ class ShareReceiverActivity : ComponentActivity() {
         val sharedText = if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             intent.getStringExtra(Intent.EXTRA_TEXT)
         } else null
+        val sharedName = sharedUri?.let { displayName(it) }
+        val sharedMime = intent.type ?: sharedUri?.let { contentResolver.getType(it) }
+        val isFmv = sharedUri != null && (
+            sharedName?.lowercase()?.endsWith(".fmv") == true ||
+                sharedMime == "application/vnd.familymedicalvault.package+zip" ||
+                sharedMime == "application/zip" ||
+                sharedMime == "application/x-zip-compressed"
+            )
 
         setContent {
             MaterialTheme {
-                ShareImportScreen(
-                    sharedUri = sharedUri,
-                    sharedText = sharedText,
-                    onDone = { finish() },
-                    onOpenMain = {
-                        startActivity(Intent(this, MainActivity::class.java))
-                        finish()
-                    }
-                )
+                if (isFmv && sharedUri != null) {
+                    AutoFmvShareScreen(
+                        sharedUri = sharedUri,
+                        onDone = { finish() },
+                        onOpenImported = { person, category ->
+                            startActivity(Intent(this, MainActivity::class.java).apply {
+                                putExtra(MainActivity.EXTRA_PERSON, person)
+                                putExtra(MainActivity.EXTRA_CATEGORY, category.folderName)
+                            })
+                            finish()
+                        },
+                        onOpenMain = {
+                            startActivity(Intent(this, MainActivity::class.java))
+                            finish()
+                        }
+                    )
+                } else {
+                    ShareImportScreen(
+                        sharedUri = sharedUri,
+                        sharedText = sharedText,
+                        onDone = { finish() },
+                        onOpenMain = {
+                            startActivity(Intent(this, MainActivity::class.java))
+                            finish()
+                        }
+                    )
+                }
             }
         }
     }
@@ -69,6 +101,114 @@ class ShareReceiverActivity : ComponentActivity() {
         } else {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+        }
+    }
+
+    private fun displayName(uri: Uri): String? {
+        var cursor: Cursor? = null
+        return try {
+            cursor = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            if (cursor != null && cursor.moveToFirst()) cursor.getString(0) else uri.lastPathSegment
+        } catch (_: Throwable) {
+            uri.lastPathSegment
+        } finally {
+            cursor?.close()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AutoFmvShareScreen(
+    sharedUri: Uri,
+    onDone: () -> Unit,
+    onOpenImported: (String, MedicalCategory) -> Unit,
+    onOpenMain: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { VaultPreferences(context) }
+    val storage = remember { VaultStorage(context) }
+    val rootUriString by prefs.rootUri.collectAsStateWithLifecycle(initialValue = null)
+    val rootUri = rootUriString?.let(Uri::parse)
+
+    var status by remember { mutableStateOf("Έλεγχος και αποθήκευση…") }
+    var successPerson by remember { mutableStateOf<String?>(null) }
+    var successCategory by remember { mutableStateOf<MedicalCategory?>(null) }
+    var started by remember { mutableStateOf(false) }
+
+    LaunchedEffect(rootUriString, sharedUri) {
+        if (started || rootUri == null) return@LaunchedEffect
+        started = true
+
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val manifest = FmvPackage.validate {
+                    context.contentResolver.openInputStream(sharedUri)
+                        ?: error("Αδυναμία ανάγνωσης του .fmv")
+                }.getOrThrow()
+
+                val category = MedicalCategory.fromFolderName(manifest.category)
+                    ?: error("Άγνωστη κατηγορία")
+
+                storage.importWithWriterExistingOnly(
+                    rootUri = rootUri,
+                    personFolder = manifest.person,
+                    category = category,
+                    preferredName = manifest.displayName,
+                    mimeType = manifest.mimeType
+                ) { output ->
+                    FmvPackage.copyPayload(
+                        openStream = {
+                            context.contentResolver.openInputStream(sharedUri)
+                                ?: error("Αδυναμία ανάγνωσης του .fmv")
+                        },
+                        manifest = manifest,
+                        output = output
+                    ).getOrThrow()
+                }.getOrThrow()
+
+                Pair(manifest, category)
+            }
+        }
+
+        result.onSuccess { pair ->
+            successPerson = pair.first.person
+            successCategory = pair.second
+            status = "Αποθηκεύτηκε: " + pair.first.person + " / " + pair.second.folderName + " / " + pair.first.displayName
+        }.onFailure { error ->
+            status = "Δεν αποθηκεύτηκε: " + (error.message ?: "άγνωστο σφάλμα")
+        }
+    }
+
+    Scaffold(topBar = { TopAppBar(title = { Text("Ιατρικός Φάκελος") }) }) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (rootUri == null) {
+                Text("Δεν έχει συνδεθεί ο κεντρικός φάκελος του κινητού.")
+                Button(onClick = onOpenMain, modifier = Modifier.fillMaxWidth()) {
+                    Text("Σύνδεση φακέλου")
+                }
+                return@Column
+            }
+
+            Text(status)
+
+            val person = successPerson
+            val category = successCategory
+            if (person != null && category != null) {
+                Button(
+                    onClick = { onOpenImported(person, category) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Άνοιγμα στον φάκελο")
+                }
+            }
+
+            Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
+                Text("Τέλος")
+            }
         }
     }
 }
@@ -111,11 +251,11 @@ private fun ShareImportScreen(
             val people = remember(rootUriString) { storage.listPeople(rootUri) }
             if (people.isEmpty()) {
                 Text("Δεν υπάρχουν ακόμη πρόσωπα στον ιατρικό φάκελο.")
-                Button(onClick = onOpenMain) { Text("Προσθήκη προσώπου") }
+                Button(onClick = onOpenMain) { Text("Άνοιγμα εφαρμογής") }
                 return@Column
             }
 
-            Text("1. Ποιον αφορά;", style = MaterialTheme.typography.titleMedium)
+            Text("Ποιον αφορά;", style = MaterialTheme.typography.titleMedium)
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -129,7 +269,7 @@ private fun ShareImportScreen(
                 }
             }
 
-            Text("2. Κατηγορία", style = MaterialTheme.typography.titleMedium)
+            Text("Κατηγορία", style = MaterialTheme.typography.titleMedium)
             MedicalCategory.entries.chunked(3).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     row.forEach { category ->
