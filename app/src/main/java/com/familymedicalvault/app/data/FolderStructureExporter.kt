@@ -13,27 +13,33 @@ class FolderStructureExporter(private val context: Context) {
         val grantedRoot = DocumentFile.fromTreeUri(context, rootUri)
             ?: error("Δεν ήταν δυνατή η πρόσβαση στον συνδεδεμένο φάκελο.")
 
-        val examsRoot = locateExamsRoot(grantedRoot)
-            ?: error("Δεν βρέθηκε φάκελος εξετάσεων με όνομα Ιατρικός_φάκελος_*.")
+        val examsRoots = locateAllExamsRoots(grantedRoot)
+        require(examsRoots.isNotEmpty()) {
+            "Δεν βρέθηκε κανένας φάκελος εξετάσεων με όνομα Ιατρικός_φάκελος_* σε κανένα υποφάκελο."
+        }
 
-        val entries = JSONArray()
-        var count = 0
+        var totalEntries = 0
 
-        fun walk(node: DocumentFile, relativePath: String, depth: Int) {
+        fun walk(node: DocumentFile, relativePath: String, depth: Int): JSONArray {
             require(depth <= MAX_DEPTH) { "Η δομή φακέλων είναι υπερβολικά βαθιά." }
-            require(count < MAX_ENTRIES) { "Η δομή ξεπερνά το όριο των $MAX_ENTRIES αντικειμένων." }
+            val entries = JSONArray()
 
             val children = node.listFiles().sortedWith(
-                compareBy<DocumentFile> { !it.isDirectory }.thenBy { it.name?.lowercase() ?: "" }
+                compareBy<DocumentFile> { !it.isDirectory }
+                    .thenBy { it.name?.lowercase() ?: "" }
             )
 
             for (child in children) {
-                require(count < MAX_ENTRIES) { "Η δομή ξεπερνά το όριο των $MAX_ENTRIES αντικειμένων." }
+                require(totalEntries < MAX_ENTRIES) {
+                    "Η δομή ξεπερνά το όριο των $MAX_ENTRIES αντικειμένων."
+                }
+
                 val name = child.name ?: "(χωρίς όνομα)"
                 val path = if (relativePath.isBlank()) name else "$relativePath/$name"
 
                 val item = JSONObject()
                     .put("type", if (child.isDirectory) "directory" else "file")
+                    .put("name", name)
                     .put("path", path)
 
                 if (child.isFile) {
@@ -43,41 +49,73 @@ class FolderStructureExporter(private val context: Context) {
                 }
 
                 entries.put(item)
-                count++
+                totalEntries++
 
                 if (child.isDirectory) {
-                    walk(child, path, depth + 1)
+                    item.put("children", walk(child, path, depth + 1))
                 }
             }
+
+            return entries
         }
 
-        walk(examsRoot, "", 0)
+        val rootsJson = JSONArray()
+        for ((rootPath, examsRoot) in examsRoots) {
+            rootsJson.put(
+                JSONObject()
+                    .put("relativePath", rootPath)
+                    .put("rootName", examsRoot.name ?: "Ιατρικός_φάκελος")
+                    .put("entries", walk(examsRoot, "", 0))
+            )
+        }
 
         val selectedRootName = grantedRoot.name ?: "root"
-        val rootName = examsRoot.name ?: "Ιατρικός_φάκελος"
         val json = JSONObject()
             .put("format", "familymedicalvault-structure")
-            .put("version", 1)
-            .put("scope", "exams")
+            .put("version", 2)
+            .put("scope", "all-exams-folders")
             .put("selectedRootName", selectedRootName)
-            .put("rootName", rootName)
-            .put("fullRootPath", selectedRootName + "/" + rootName)
             .put("generatedAtEpochMs", System.currentTimeMillis())
             .put("containsFileContents", false)
-            .put("entries", entries)
+            .put("examFolderCount", examsRoots.size)
+            .put("entryCount", totalEntries)
+            .put("examRoots", rootsJson)
 
         val shareDir = File(context.cacheDir, "shared").apply { mkdirs() }
-        val out = File(shareDir, "FamilyMedicalVault-structure-exams.json")
+        val out = File(shareDir, "FamilyMedicalVault-structure-all-exams.json")
         out.writeText(json.toString(2), Charsets.UTF_8)
         out
     }
 
-    private fun locateExamsRoot(root: DocumentFile): DocumentFile? {
-        val name = root.name.orEmpty()
-        if (isExamsFolderName(name)) return root
+    private fun locateAllExamsRoots(root: DocumentFile): List<Pair<String, DocumentFile>> {
+        val found = mutableListOf<Pair<String, DocumentFile>>()
+        var scanned = 0
 
-        return root.listFiles()
-            .firstOrNull { it.isDirectory && isExamsFolderName(it.name.orEmpty()) }
+        fun search(node: DocumentFile, relativePath: String, depth: Int) {
+            require(depth <= MAX_SEARCH_DEPTH) { "Η αναζήτηση φακέλων είναι υπερβολικά βαθιά." }
+            require(scanned < MAX_SCAN_ENTRIES) {
+                "Η αναζήτηση ξεπερνά το όριο των $MAX_SCAN_ENTRIES φακέλων/αρχείων."
+            }
+
+            val nodeName = node.name.orEmpty()
+            if (node.isDirectory && isExamsFolderName(nodeName)) {
+                found += relativePath to node
+                return
+            }
+
+            if (!node.isDirectory) return
+
+            for (child in node.listFiles()) {
+                scanned++
+                if (!child.isDirectory) continue
+                val childName = child.name ?: "(χωρίς όνομα)"
+                val childPath = if (relativePath.isBlank()) childName else "$relativePath/$childName"
+                search(child, childPath, depth + 1)
+            }
+        }
+
+        search(root, "", 0)
+        return found.sortedBy { it.first.lowercase() }
     }
 
     private fun isExamsFolderName(name: String): Boolean {
@@ -89,7 +127,9 @@ class FolderStructureExporter(private val context: Context) {
     }
 
     companion object {
-        const val MAX_ENTRIES = 10_000
-        const val MAX_DEPTH = 20
+        const val MAX_ENTRIES = 20_000
+        const val MAX_DEPTH = 30
+        const val MAX_SEARCH_DEPTH = 20
+        const val MAX_SCAN_ENTRIES = 20_000
     }
 }
