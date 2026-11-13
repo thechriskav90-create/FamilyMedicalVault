@@ -45,7 +45,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.familymedicalvault.app.data.VaultPreferences
 import com.familymedicalvault.app.data.VaultStorage
 import com.familymedicalvault.app.model.MedicalCategory
+import com.familymedicalvault.app.export.FolderTreeExporter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -145,6 +148,50 @@ fun MedicalVaultApp(initialPerson: String? = null, initialCategory: MedicalCateg
                 }
                 Text(
                     "Διάλεξε το αρχείο .fmv από τις Λήψεις. Η εφαρμογή θα το ελέγξει πριν σου δείξει την επιβεβαίωση.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                FolderTreeExporter.exportMedicalFolderStructure(context, rootUri)
+                            }
+                            result.onSuccess { export ->
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/json"
+                                    putExtra(Intent.EXTRA_STREAM, export.shareUri)
+                                    putExtra(
+                                        Intent.EXTRA_TEXT,
+                                        "Δομή ιατρικού φακέλου: " + export.rootName +
+                                            " (" + export.itemCount + " αντικείμενα). " +
+                                            "Περιέχει μόνο ονόματα/μεταδεδομένα, όχι ιατρικό περιεχόμενο."
+                                    )
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    clipData = ClipData.newUri(
+                                        context.contentResolver,
+                                        "FamilyMedicalVault exams structure",
+                                        export.shareUri
+                                    )
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        shareIntent,
+                                        "Κοινή χρήση δομής με ChatGPT"
+                                    )
+                                )
+                                message = "Η δομή του φακέλου εξετάσεων είναι έτοιμη για κοινή χρήση."
+                            }.onFailure {
+                                message = "Αποτυχία εξαγωγής δομής: " + (it.message ?: "άγνωστο σφάλμα")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Κοινή χρήση δομής εξετάσεων")
+                }
+                Text(
+                    "Στέλνει μόνο ονόματα φακέλων/αρχείων και βασικά μεταδεδομένα. Δεν στέλνει το περιεχόμενο των εξετάσεων.",
                     style = MaterialTheme.typography.bodySmall
                 )
 
