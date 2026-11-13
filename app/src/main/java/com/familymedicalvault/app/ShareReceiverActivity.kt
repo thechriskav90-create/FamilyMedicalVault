@@ -150,13 +150,7 @@ private fun AutoFmvShareScreen(
                 val category = MedicalCategory.fromFolderName(manifest.category)
                     ?: error("Άγνωστη κατηγορία")
 
-                storage.importWithWriterExistingOnly(
-                    rootUri = rootUri,
-                    personFolder = manifest.person,
-                    category = category,
-                    preferredName = manifest.displayName,
-                    mimeType = manifest.mimeType
-                ) { output ->
+                val writer: (java.io.OutputStream) -> Unit = { output ->
                     FmvPackage.copyPayload(
                         openStream = {
                             context.contentResolver.openInputStream(sharedUri)
@@ -165,7 +159,26 @@ private fun AutoFmvShareScreen(
                         manifest = manifest,
                         output = output
                     ).getOrThrow()
-                }.getOrThrow()
+                }
+
+                if (manifest.relativePath != null) {
+                    storage.importWithWriterAtExistingPath(
+                        rootUri = rootUri,
+                        relativePath = manifest.relativePath,
+                        preferredName = manifest.displayName,
+                        mimeType = manifest.mimeType,
+                        writer = writer
+                    ).getOrThrow()
+                } else {
+                    storage.importWithWriterExistingOnly(
+                        rootUri = rootUri,
+                        personFolder = manifest.person,
+                        category = category,
+                        preferredName = manifest.displayName,
+                        mimeType = manifest.mimeType,
+                        writer = writer
+                    ).getOrThrow()
+                }
 
                 Pair(manifest, category)
             }
@@ -174,7 +187,8 @@ private fun AutoFmvShareScreen(
         result.onSuccess { pair ->
             successPerson = pair.first.person
             successCategory = pair.second
-            status = "Αποθηκεύτηκε: " + pair.first.person + " / " + pair.second.folderName + " / " + pair.first.displayName
+            val destination = pair.first.relativePath ?: (pair.first.person + " / " + pair.second.folderName)
+            status = "Αποθηκεύτηκε: " + destination + " / " + pair.first.displayName
         }.onFailure { error ->
             status = "Δεν αποθηκεύτηκε: " + (error.message ?: "άγνωστο σφάλμα")
         }
